@@ -8,12 +8,23 @@ import { geoJsonToSvgPath } from "../utils/geoToSvg";
 const BRAND_TEXT = "Live Fresh";
 
 const FONT_OPTIONS = [
-  { label: "Script (Great Vibes)", value: "'Great Vibes', cursive" },
-  { label: "Bold Script (Pacifico)", value: "'Pacifico', cursive" },
-  { label: "Clean Sans (Montserrat)", value: "'Montserrat', sans-serif" },
-  { label: "Condensed (Oswald)", value: "'Oswald', sans-serif" },
-  { label: "Serif (Playfair Display)", value: "'Playfair Display', serif" },
+  { label: "Script (Great Vibes)", value: "'Great Vibes', cursive", capHeightRatio: 0.56 },
+  { label: "Bold Script (Pacifico)", value: "'Pacifico', cursive", capHeightRatio: 0.66 },
+  { label: "Clean Sans (Montserrat)", value: "'Montserrat', sans-serif", capHeightRatio: 0.72 },
+  { label: "Condensed (Oswald)", value: "'Oswald', sans-serif", capHeightRatio: 0.75 },
+  { label: "Serif (Playfair Display)", value: "'Playfair Display', serif", capHeightRatio: 0.70 },
 ];
+
+// The lake name always renders in Montserrat.
+const NAME_FONT_CAP_HEIGHT_RATIO = 0.72;
+
+// Script fonts (like the default "Great Vibes") have noticeably smaller
+// glyphs than sans-serif fonts at the same point size — a 34px script font
+// can visually read as roughly the same size as a 22px sans-serif label,
+// even though the raw numbers suggest the brand text is much bigger. This
+// factor guarantees "Live Fresh" always reads as the dominant text,
+// regardless of font choice or the text-size slider.
+const MIN_BRAND_TO_NAME_VISUAL_RATIO = 1.6;
 
 // baseScale/cx/cy define where the lake silhouette sits by default in each
 // template's viewBox (before any manual resize/drag is applied). lakeScale
@@ -397,8 +408,17 @@ function LogoPreview({
   const translateY = t.cy - 250 * s + lakeOffset.y;
   const lakeTransform = `translate(${translateX.toFixed(2)}, ${translateY.toFixed(2)}) scale(${s.toFixed(3)})`;
 
-  const brandFontSize = t.brandFontSize * textScale;
   const nameFontSize = t.nameFontSize * textScale;
+  // Ensure "Live Fresh" always reads as visually larger than the lake name,
+  // no matter which script font or text-size setting is chosen. We correct
+  // for each font's actual glyph proportions (cap height ratio) rather than
+  // just comparing raw point sizes, since script fonts render smaller than
+  // their point size would suggest.
+  const selectedFont = FONT_OPTIONS.find((f) => f.value === font) || FONT_OPTIONS[0];
+  const nameVisualHeight = nameFontSize * NAME_FONT_CAP_HEIGHT_RATIO;
+  const minBrandFontSize =
+    (nameVisualHeight * MIN_BRAND_TO_NAME_VISUAL_RATIO) / selectedFont.capHeightRatio;
+  const brandFontSize = Math.max(t.brandFontSize * textScale, minBrandFontSize);
   const nameLabel = showDivider ? `— ${bottomText} —` : bottomText;
   const textColor = fillMode === "outline" ? strokeColor : fillColor;
 
