@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { geoJsonToSvgPath } from "../utils/geoToSvg";
 
 // "Live Fresh" is the brand mark. It's intentionally not editable — the
@@ -16,9 +16,9 @@ const FONT_OPTIONS = [
 ];
 
 // baseScale/cx/cy define where the lake silhouette sits by default in each
-// template's viewBox. lakeScale multiplies baseScale, and the translate is
-// recalculated so scaling always happens around the same visual center
-// instead of drifting toward a corner.
+// template's viewBox (before any manual resize/drag is applied). lakeScale
+// multiplies baseScale, and the translate is recalculated so scaling always
+// happens around this same visual center instead of drifting to a corner.
 const TEMPLATES = {
   stacked: {
     label: "Stacked (silhouette, script, name)",
@@ -68,6 +68,7 @@ export default function LogoEditor({ lake, onBack }) {
   const [showDivider, setShowDivider] = useState(true);
   const [lakeScale, setLakeScale] = useState(1);
   const [textScale, setTextScale] = useState(1);
+  const [lakeOffset, setLakeOffset] = useState({ x: 0, y: 0 });
 
   const svgRef = useRef(null);
 
@@ -83,6 +84,13 @@ export default function LogoEditor({ lake, onBack }) {
     if (mode === "outline" && strokeWidth === 0) {
       setStrokeWidth(3);
     }
+  }
+
+  function handleTemplateChange(newTemplate) {
+    setTemplate(newTemplate);
+    // Each template has a different default center point, so a manual drag
+    // offset from one layout won't make sense in another — reset it.
+    setLakeOffset({ x: 0, y: 0 });
   }
 
   function downloadSvg() {
@@ -147,7 +155,7 @@ export default function LogoEditor({ lake, onBack }) {
 
         <fieldset>
           <legend>Template</legend>
-          <select value={template} onChange={(e) => setTemplate(e.target.value)}>
+          <select value={template} onChange={(e) => handleTemplateChange(e.target.value)}>
             {Object.entries(TEMPLATES).map(([id, t]) => (
               <option key={id} value={id}>{t.label}</option>
             ))}
@@ -186,7 +194,10 @@ export default function LogoEditor({ lake, onBack }) {
         </fieldset>
 
         <fieldset>
-          <legend>Size</legend>
+          <legend>Lake position & size</legend>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Drag the lake shape directly in the preview to reposition it.
+          </p>
           <label className="field-label">Lake shape size: {Math.round(lakeScale * 100)}%</label>
           <input
             type="range"
@@ -196,6 +207,14 @@ export default function LogoEditor({ lake, onBack }) {
             value={lakeScale}
             onChange={(e) => setLakeScale(Number(e.target.value))}
           />
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setLakeOffset({ x: 0, y: 0 })}
+          >
+            Center lake shape
+          </button>
+
           <label className="field-label">Text size: {Math.round(textScale * 100)}%</label>
           <input
             type="range"
@@ -284,10 +303,65 @@ export default function LogoEditor({ lake, onBack }) {
           showDivider={showDivider}
           lakeScale={lakeScale}
           textScale={textScale}
+          lakeOffset={lakeOffset}
+          onLakeOffsetChange={setLakeOffset}
         />
       </div>
     </div>
   );
+}
+
+/**
+ * Converts a pointer-drag distance in on-screen pixels into an equivalent
+ * distance in the SVG's own viewBox units, using the current rendered size
+ * of the <svg> element. This is what makes dragging feel 1:1 regardless of
+ * how large the preview is rendered on screen.
+ */
+function useDragToReposition(svgRef, offset, onOffsetChange) {
+  const dragState = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handlePointerMove = useCallback(
+    (e) => {
+      if (!dragState.current || !svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
+      const viewBox = svgRef.current.viewBox.baseVal;
+      const scaleX = viewBox.width / rect.width;
+      const scaleY = viewBox.height / rect.height;
+      const dx = (e.clientX - dragState.current.startClientX) * scaleX;
+      const dy = (e.clientY - dragState.current.startClientY) * scaleY;
+      onOffsetChange({
+        x: dragState.current.startOffsetX + dx,
+        y: dragState.current.startOffsetY + dy,
+      });
+    },
+    [svgRef, onOffsetChange]
+  );
+
+  const handlePointerUp = useCallback(() => {
+    dragState.current = null;
+    setIsDragging(false);
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+  }, [handlePointerMove]);
+
+  const handlePointerDown = useCallback(
+    (e) => {
+      e.preventDefault();
+      dragState.current = {
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startOffsetX: offset.x,
+        startOffsetY: offset.y,
+      };
+      setIsDragging(true);
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [offset, handlePointerMove, handlePointerUp]
+  );
+
+  return { handlePointerDown, isDragging };
 }
 
 function LogoPreview({
@@ -304,37 +378,52 @@ function LogoPreview({
   showDivider,
   lakeScale,
   textScale,
+  lakeOffset,
+  onLakeOffsetChange,
 }) {
   const t = TEMPLATES[template];
+  const { handlePointerDown, isDragging } = useDragToReposition(svgRef, lakeOffset, onLakeOffsetChange);
 
   const shapeStyle =
     fillMode === "outline"
       ? { fill: "none", stroke: strokeColor, strokeWidth: strokeWidth || 3 }
       : { fill: fillColor, stroke: strokeWidth > 0 ? strokeColor : "none", strokeWidth };
 
-  // Scale the lake path around its visual center (t.cx, t.cy) rather than
-  // the SVG origin, so the slider grows/shrinks it in place instead of
-  // pushing it off to one side.
+  // Scale the lake path around its visual center (t.cx, t.cy), then apply
+  // the manual drag offset on top — offset is stored directly in viewBox
+  // units so it composes cleanly with the centering math.
   const s = t.baseScale * lakeScale;
-  const translateX = t.cx - 250 * s;
-  const translateY = t.cy - 250 * s;
+  const translateX = t.cx - 250 * s + lakeOffset.x;
+  const translateY = t.cy - 250 * s + lakeOffset.y;
   const lakeTransform = `translate(${translateX.toFixed(2)}, ${translateY.toFixed(2)}) scale(${s.toFixed(3)})`;
 
   const brandFontSize = t.brandFontSize * textScale;
   const nameFontSize = t.nameFontSize * textScale;
   const nameLabel = showDivider ? `— ${bottomText} —` : bottomText;
+  const textColor = fillMode === "outline" ? strokeColor : fillColor;
+
+  const lakeGroup = (
+    <g
+      transform={lakeTransform}
+      onPointerDown={handlePointerDown}
+      style={{ cursor: isDragging ? "grabbing" : "grab", touchAction: "none" }}
+    >
+      {/* pointerEvents="all" ensures the whole shape is draggable even in
+          outline mode, where fill is "none" and clicks would otherwise only
+          register on the stroke itself. */}
+      <path d={pathData.d} style={shapeStyle} fillRule="evenodd" pointerEvents="all" />
+    </g>
+  );
 
   if (template === "badge") {
     return (
       <svg ref={svgRef} viewBox={t.viewBox} width="100%" role="img" aria-label={`${bottomText} logo`}>
-        <circle cx="250" cy="250" r="230" fill="none" stroke={fillMode === "outline" ? strokeColor : fillColor} strokeWidth="6" />
-        <text x="250" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={fillMode === "outline" ? strokeColor : fillColor}>
+        <circle cx="250" cy="250" r="230" fill="none" stroke={textColor} strokeWidth="6" />
+        <text x="250" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={textColor}>
           {brandText}
         </text>
-        <g transform={lakeTransform}>
-          <path d={pathData.d} style={shapeStyle} fillRule="evenodd" />
-        </g>
-        <text x="250" y={t.nameY} textAnchor="middle" fontFamily="'Montserrat', sans-serif" fontSize={nameFontSize} letterSpacing="2" fill={fillMode === "outline" ? strokeColor : fillColor}>
+        {lakeGroup}
+        <text x="250" y={t.nameY} textAnchor="middle" fontFamily="'Montserrat', sans-serif" fontSize={nameFontSize} letterSpacing="2" fill={textColor}>
           {nameLabel}
         </text>
       </svg>
@@ -344,13 +433,11 @@ function LogoPreview({
   if (template === "sideBySide") {
     return (
       <svg ref={svgRef} viewBox={t.viewBox} width="100%" role="img" aria-label={`${bottomText} logo`}>
-        <g transform={lakeTransform}>
-          <path d={pathData.d} style={shapeStyle} fillRule="evenodd" />
-        </g>
-        <text x="420" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={fillMode === "outline" ? strokeColor : fillColor}>
+        {lakeGroup}
+        <text x="420" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={textColor}>
           {brandText}
         </text>
-        <text x="420" y={t.nameY} textAnchor="middle" fontFamily="'Montserrat', sans-serif" fontSize={nameFontSize} letterSpacing="2" fill={fillMode === "outline" ? strokeColor : fillColor}>
+        <text x="420" y={t.nameY} textAnchor="middle" fontFamily="'Montserrat', sans-serif" fontSize={nameFontSize} letterSpacing="2" fill={textColor}>
           {nameLabel}
         </text>
       </svg>
@@ -360,13 +447,11 @@ function LogoPreview({
   // default: stacked
   return (
     <svg ref={svgRef} viewBox={t.viewBox} width="100%" role="img" aria-label={`${bottomText} logo`}>
-      <g transform={lakeTransform}>
-        <path d={pathData.d} style={shapeStyle} fillRule="evenodd" />
-      </g>
-      <text x="250" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={fillMode === "outline" ? strokeColor : fillColor}>
+      {lakeGroup}
+      <text x="250" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={textColor}>
         {brandText}
       </text>
-      <text x="250" y={t.nameY} textAnchor="middle" fontFamily="'Montserrat', sans-serif" fontSize={nameFontSize} letterSpacing="3" fill={fillMode === "outline" ? strokeColor : fillColor}>
+      <text x="250" y={t.nameY} textAnchor="middle" fontFamily="'Montserrat', sans-serif" fontSize={nameFontSize} letterSpacing="3" fill={textColor}>
         {nameLabel}
       </text>
     </svg>
