@@ -437,7 +437,7 @@ function LogoPreview({
 
   if (template === "badge") {
     return (
-      <svg ref={svgRef} viewBox={t.viewBox} width="100%" role="img" aria-label={`${bottomText} logo`}>
+      <svg ref={svgRef} viewBox={t.viewBox} width="100%" style={{ overflow: "visible" }} role="img" aria-label={`${bottomText} logo`}>
         <circle cx="250" cy="250" r="230" fill="none" stroke={textColor} strokeWidth="6" />
         <text x="250" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={textColor}>
           {brandText}
@@ -452,7 +452,7 @@ function LogoPreview({
 
   if (template === "sideBySide") {
     return (
-      <svg ref={svgRef} viewBox={t.viewBox} width="100%" role="img" aria-label={`${bottomText} logo`}>
+      <svg ref={svgRef} viewBox={t.viewBox} width="100%" style={{ overflow: "visible" }} role="img" aria-label={`${bottomText} logo`}>
         {lakeGroup}
         <text x="420" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={textColor}>
           {brandText}
@@ -466,7 +466,7 @@ function LogoPreview({
 
   // default: stacked
   return (
-    <svg ref={svgRef} viewBox={t.viewBox} width="100%" role="img" aria-label={`${bottomText} logo`}>
+    <svg ref={svgRef} viewBox={t.viewBox} width="100%" style={{ overflow: "visible" }} role="img" aria-label={`${bottomText} logo`}>
       {lakeGroup}
       <text x="250" y={t.brandY} textAnchor="middle" fontFamily={font} fontSize={brandFontSize} fill={textColor}>
         {brandText}
