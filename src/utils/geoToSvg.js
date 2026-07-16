@@ -123,8 +123,12 @@ export function geoJsonToSvgPath(geometry, { size = 500, padding = 20, simplifyT
     .flat()
     .map((ring) => ringToPathData(ring.map(toSvgSpace)));
 
+  const rings = projectedPolygons.flat().map((ring) => ring.map(toSvgSpace));
+
   return {
     d: pathParts.join(" "),
     viewBox: `0 0 ${size} ${size}`,
+    rings,
+    size,
   };
 }

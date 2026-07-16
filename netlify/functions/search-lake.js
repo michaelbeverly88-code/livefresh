@@ -1,6 +1,6 @@
 // netlify/functions/search-lake.js
 //
-// Secure backend proxy for lake search.
+// Secure backend proxy for lake search, with a persistent cache.
 //
 // Why this exists (security rationale):
 // - The browser NEVER calls OpenStreetMap directly. All third-party requests
@@ -12,13 +12,25 @@
 //        reaching the browser (rate-limit headers, internal ids, etc).
 //     4. CORS is locked down here, not left to a public API's defaults.
 //
+// Why there's a cache:
+// - Lake shorelines don't change day to day, so there's no reason to ever
+//   look the same lake up twice. Caching in Netlify Blobs (a built-in,
+//   zero-setup key-value store) means the first search for "Lake Lanier"
+//   hits Nominatim once, and every search after that — by any customer,
+//   forever — is served instantly from the cache instead. This also keeps
+//   us comfortably under Nominatim's ~1 request/sec usage policy as traffic
+//   grows.
+//
 // Data source: OpenStreetMap Nominatim (nominatim.openstreetmap.org).
 // Free, no API key. Usage policy requires a descriptive User-Agent and caps
 // requests at ~1/sec — fine for a small app; if you scale up, swap this
 // function to call a paid geocoder or your own hosted Nominatim instance
 // without touching the frontend at all.
 
+const { getStore } = require("@netlify/blobs");
+
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const CACHE_STORE_NAME = "lake-search-cache";
 
 // Lock this down to your real domain(s) once deployed.
 const ALLOWED_ORIGINS = [
@@ -100,6 +112,36 @@ exports.handler = async (event) => {
     };
   }
 
+  // Normalize the cache key so "Lake Lanier", "lake lanier", and "  Lake
+  // Lanier  " all hit the same cache entry instead of triplicating storage.
+  const cacheKey = query.toLowerCase().trim().replace(/\s+/g, " ");
+
+  let store;
+  try {
+    store = getStore({ name: CACHE_STORE_NAME, consistency: "strong" });
+  } catch (err) {
+    // Blobs isn't available in every environment (e.g. some local dev
+    // setups without `netlify dev`). Fail open — just skip caching rather
+    // than breaking search entirely.
+    console.warn("Netlify Blobs unavailable, continuing without cache:", err.message);
+    store = null;
+  }
+
+  if (store) {
+    try {
+      const cached = await store.get(cacheKey, { type: "json" });
+      if (cached) {
+        return {
+          statusCode: 200,
+          headers: { ...headers, "X-Cache": "HIT" },
+          body: JSON.stringify({ query, results: cached.results }),
+        };
+      }
+    } catch (err) {
+      console.warn("Cache read failed, falling through to live search:", err.message);
+    }
+  }
+
   try {
     const params = new URLSearchParams({
       q: query,
@@ -158,9 +200,20 @@ exports.handler = async (event) => {
       )
       .slice(0, 8);
 
+    // Only cache non-empty results — an empty result could just be a
+    // transient upstream hiccup, and we don't want to permanently cache "no
+    // lake found" for a query that would succeed on retry.
+    if (store && lakes.length > 0) {
+      try {
+        await store.setJSON(cacheKey, { results: lakes, cachedAt: Date.now() });
+      } catch (err) {
+        console.warn("Cache write failed (non-fatal):", err.message);
+      }
+    }
+
     return {
       statusCode: 200,
-      headers,
+      headers: { ...headers, "X-Cache": "MISS" },
       body: JSON.stringify({ query, results: lakes }),
     };
   } catch (err) {

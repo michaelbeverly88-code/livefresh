@@ -207,3 +207,106 @@ body {
 .app-footer a {
   color: #999;
 }
+
+/* Simplified customer flow */
+.simple-flow-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 32px;
+  margin-top: 16px;
+}
+@media (max-width: 800px) {
+  .simple-flow-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.simple-preview-panel {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+.simple-controls-panel input[type="text"],
+.simple-controls-panel select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+.preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+.preset-swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.82rem;
+  text-align: left;
+}
+.preset-swatch.selected {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+.preset-swatch-color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+/* Product selector */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+.product-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.product-card-preview {
+  background: var(--paper);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
+.product-card-preview svg {
+  max-height: 220px;
+  width: auto;
+}
+.product-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.product-card-actions button {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ink);
+  background: white;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
